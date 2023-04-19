@@ -1,0 +1,299 @@
+---
+title: "Evaluación SDEA"
+author: Matías Rebolledo
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 2
+---
+
+<br>
+<br>
+<br>
+
+# Dependencias.
+
+```{r dep}
+  suppressPackageStartupMessages(library(data.table))
+  suppressPackageStartupMessages(library(openxlsx))
+  suppressPackageStartupMessages(library(arrow))
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 0.
+
+Enunciado:
+
+Carga las siguientes BBDD´s: BBDD_EMG.xlsx ; BBDD_EMA.xlsx ; BBDD_EFG.xlsx
+
+Respuesta:
+
+```{r ejercicio_00}
+ema <- setDT(read_parquet("enunciado/BBDD_EMA.parquet"))
+emg <- setDT(read_parquet("enunciado/BBDD_EMG.parquet"))
+efg <- setDT(read_parquet("enunciado/BBDD_EFG.parquet"))
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 1.
+
+Enunciado:
+
+A partir de BBDD_EMG
+
+Resumir el total de cabezas (NroAnimales) para la especie Bovinos, por Mes,
+para el Año 2022 e imprimir los ultimos 6 valores.
+
+Respuesta:
+
+```{r ejercicio_01}
+emg[ Año %in% 2022 & Especies %in% 8 ,
+    lapply(.SD, function(x) sum(x, na.rm=T)),
+    by=Mes,
+    .SDcols="NroAnimales" ]
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 2.
+
+Enunciado:
+
+A partir de BBDD_EMG
+
+Resumir el total de cabezas (NroAnimales) para la especie Ovinos y Porcinos,
+por Año y Trimestre e imprimir los ultimos 6 valores.
+
+Donde: Trimestre 1 = meses (1,2,3); Trimestre 2 = meses (4,5,6); Trimestre 3 =
+meses (7,8,9); Trimestre 4 = meses (10,11,12)
+
+Respuesta:
+
+```{r ejercicio_02}
+emg[ Mes %in% 1:3 , Trimestre := 1 ]
+emg[ Mes %in% 4:6 , Trimestre := 2 ]
+emg[ Mes %in% 7:9 , Trimestre := 3 ]
+emg[ Mes %in% 10:12 , Trimestre := 4 ]
+emg[ Especies %in% 9  , Nombre_Especies := "Ovinos" ]
+emg[ Especies %in% 10 , Nombre_Especies := "Porcinos" ]
+dcast(
+emg[ Especies %in% c(9,10) ,
+    lapply(.SD, function(x) sum(x, na.rm=T)),
+    by=.(Año,Trimestre,Especies,Nombre_Especies),
+    .SDcols="NroAnimales" ],
+    Año + Trimestre ~ Nombre_Especies , value.var="NroAnimales" ,
+    fun.aggregate = function(x) sum(x, na.rm=T))[, tail(.SD,6)]
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 3.
+
+Enunciado:
+
+A partir de BBDD_EMG
+
+Contar el número de roles por Mes y Región, para el Año 2022.
+
+Respuesta:
+
+```{r ejercicio_03}
+dcast(
+emg[Año %in% 2022, unique(Rol), by=.(Mes,Region) ],
+Mes ~ Region , value.var="V1" ,
+fun.aggregate=length )
+sum(dcast(
+emg[Año %in% 2022, unique(Rol), by=.(Mes,Region) ],
+Mes ~ Region , value.var="V1" ,
+fun.aggregate=length )[, -c("Mes")][,
+colSums(.SD, na.rm=T)])
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 4.
+
+Enunciado:
+
+A partir de BBDD_EMA
+
+Calcular la diferencia entre el numero de aves faenadas, para la especie
+Broilers en junio 2022 y junio 2021.
+
+Respuesta:
+
+```{r ejercicio_04}
+unlist(
+ema[ Año %in% 2021      & Mes %in% 6 & Especies %in% 1 ,
+    lapply(.SD, function(x) sum(x, na.rm=T)),
+    by=.(Año,Mes,Especies),
+    .SDcols="num_aves_faenadas" ][, .(num_aves_faenadas) ]
+) - unlist(
+ema[ Año %in%      2022 & Mes %in% 6 & Especies %in% 1 ,
+    lapply(.SD, function(x) sum(x, na.rm=T)),
+    by=.(Año,Mes,Especies),
+    .SDcols="num_aves_faenadas" ][, .(num_aves_faenadas) ]
+)
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 5.
+
+Enunciado:
+
+A partir de BBDD_EMA
+
+Genera una columna llamada PVU (Peso vivo unitario), dividiendo las variables
+total−peso−vivo / num−aves−faenadas
+
+Luego calcula el PVU promedio, para la especie Pavos, en el Año 2021, Mes de
+Agosto.
+
+Respuesta:
+
+```{r ejercicio_05}
+ema[, PVU := total_peso_vivo / num_aves_faenadas ]
+ema[Año %in% 2021 & Mes %in% 8 & Especies %in% 3,
+    lapply(.SD, function(x) mean(x, na.rm=T)),
+    by=.(Año,Mes,Especies),
+    .SDcols="PVU" ]
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 6.
+
+Enunciado:
+
+A partir de BBDD_EMA
+
+Contar el número de Roles que faenaron la especie Broilers, por Mes y Región o
+Agrupación Regional, para el Año 2022.
+
+Respuesta:
+
+```{r ejercicio_06}
+ema[Año %in% 2022 & Especies %in% 1 ,
+    unique(Rol), by=.(Mes,Region) ][, .N]
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 7.
+
+Enunciado:
+
+A partir de BBDD_EFG
+
+Genera una columna llamada Trimestre. Donde: Trimestre 1 = meses (1,2,3);
+Trimestre 2 = meses (4,5,6); Trimestre 3 = meses (7,8,9); Trimestre 4 = meses
+(10,11,12)
+
+Luego genera un resumen por Año y Trimestre con el Total Cabezas, para las
+especies OVINOS, PORCINOS, EQUINOS y CAPRINOS e imprime los ultimos 6 valores.
+
+Respuesta:
+
+```{r ejercicio_07}
+efg[ Mes %in% 1:3 , Trimestre := 1 ]
+efg[ Mes %in% 4:6 , Trimestre := 2 ]
+efg[ Mes %in% 7:9 , Trimestre := 3 ]
+efg[ Mes %in% 10:12 , Trimestre := 4 ]
+efg[ Especie %in% 14 , Nombre_Especies := "Ovinos" ]
+efg[ Especie %in% 15 , Nombre_Especies := "Porcinos" ]
+efg[ Especie %in% 16 , Nombre_Especies := "Equinos" ]
+efg[ Especie %in% 18 , Nombre_Especies := "Caprinos" ]
+dcast(
+efg[Especie %in% c(14:16,18),
+    lapply(.SD, function(x) sum(x, na.rm=T)),
+    by=.(Año,Trimestre,Especie,Nombre_Especies),
+    .SDcols="Total.Cabezas" ],
+    Año + Trimestre ~ Nombre_Especies , value.var="Total.Cabezas" ,
+    fun.aggregate = function(x) sum(x, na.rm=T))[, tail(.SD,6)]
+```
+
+<br>
+<br>
+<br>
+
+# Ejercicio 8.
+
+Enunciado:
+
+Comente, como afecta el conflicto de Ucrania y Rusia, abordado desde el puto de
+vista agropecuario a Chile.
+
+Respuesta:
+
+- Hay una disminución en la producción de productos agropecuarios desde ambos
+  países, lo que genera una disminución en la oferta de productos,
+  principalmente cultivos anuales.
+- Hay una disminución en la producción de insumos para la agricultura, lo que
+  deja sin proveedores a las empresas locales.
+- Hay un aumento en el precio de materias primas, insumos y combustibles, lo
+  que dificulta la producción, eleva las tasas de interés para préstamos, entre
+  otros efectos adversos.
+
+<br>
+<br>
+<br>
+
+# Extra.
+
+Los archivos excel se convierten a parquet con la siguiente función.
+Agiliza su carga en sesión para compilar el informe sucesivamente.
+
+```{r extra}
+# #!/usr/bin/env R
+# args = commandArgs(trailingOnly=TRUE)
+# if (length(args)==0) {
+#   stop("Al menos un argumento debe ser suministrado.\n", call.=FALSE)
+# }
+
+  XlsxAParquet <- function( strxls , strprq , strsht )
+  {
+    suppressPackageStartupMessages(library(arrow))
+    suppressPackageStartupMessages(library(data.table))
+    suppressPackageStartupMessages(library(openxlsx))
+   #if(strsht == ""){
+      strdfm <- openxlsx::read.xlsx(strxls)
+   #} else {
+   #  strdfm <- openxlsx::read.xlsx(file=strxls, sheet=strsht)
+   #}
+    setDT(strdfm)
+    write_parquet( strdfm , strprq )
+  }
+
+# if(!interactive()){
+#   strdfm  <-
+#   XlsxAParquet(
+#   strxls  = args[1]
+#  ,strprq  = args[2]
+#  ,strsht  = args[3]
+#   )
+# }
+```
+
